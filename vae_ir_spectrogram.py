@@ -7,14 +7,15 @@ from torch.autograd import Variable
 from torch.distributions import Normal
 from torch.distributions.kl import kl_divergence
 import json
+import numpy.random as random
 
 # model hyperparameters
 dataset_path = '../data/spectrograms.npy'
 labels_path = '../data/label_list.npy'
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-batch_size = 2
+batch_size = 16
 learning_rate = 1e-5
-num_epochs = 100
+num_epochs = 30
 
 # load dataset
 dataset = np.load(dataset_path, allow_pickle=True)
@@ -25,8 +26,8 @@ input_size1 = dataset.shape[2]
 
 # define model params
 
-hidden_size = 512
-latent_size = 32
+hidden_size = 256
+latent_size = 64
 output_size = input_size0 * input_size1
 
 # define model
@@ -71,8 +72,14 @@ def loss_function(recon_x, x, mu, logvar):
 # define optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
+# define scheduler
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.8)
+
+rng = random.default_rng(42)
 # training loop
 for epoch in range(num_epochs):
+    rng.shuffle(dataset)
+    
     for i in range(num_samples):
         # get data
         data = dataset[i]
@@ -93,13 +100,14 @@ for epoch in range(num_epochs):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
-        print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(epoch+1, num_epochs, i+1, num_samples, loss.item()))
+        # print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(epoch+1, num_epochs, i+1, num_samples, loss.item()))
 
         # print loss
         if i % 100 == 0:
-            print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(epoch+1, num_epochs, i+1, num_samples, loss.item()))
-
+            # print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}, Learning Rate: {:.6f}'.format(epoch+1, num_epochs, i+1, num_samples, loss.item(), scheduler.get_last_lr()))
+            print(f'Epoch: {epoch+1}, Step: {i}/{num_samples}, Loss: {loss.item()}, LR: {scheduler.get_last_lr()}')
 # save model
 torch.save(model.state_dict(), 'vae_ir_spectrogram.pth')
 print('Model saved')
@@ -139,9 +147,10 @@ with open('vae_ir_spectrogram_training_data.json', 'w') as f:
 print('Model training data saved')
 
 # generate some random data
-z = torch.randn(16, latent_size).to(DEVICE)
+n_samples = 16
+z = torch.randn(n_samples, latent_size).to(DEVICE)
 recon_data = model.decode(z)
-recon_data = recon_data.view(input_size0, input_size1).cpu().detach().numpy()
+recon_data = recon_data.view(n_samples, input_size0, input_size1).cpu().detach().numpy()
 np.save('recon_data.npy', recon_data)
 print('Reconstructed data saved')
 
